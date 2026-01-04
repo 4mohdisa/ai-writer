@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
+import { GoogleGenAI } from '@google/genai'
 import mammoth from 'mammoth'
+
+interface WorkExperience {
+  company: string
+  position: string
+  duration: string
+  responsibilities: string[]
+  achievements: string[]
+}
+
+interface Education {
+  institution: string
+  degree: string
+  field: string
+  graduationYear: string
+}
 
 interface ParsedResumeData {
   userName: string
@@ -8,6 +23,11 @@ interface ParsedResumeData {
   phone: string
   professionalSummary: string
   keySkills: string
+  workExperience: WorkExperience[]
+  education: Education[]
+  certifications: string[]
+  projects: string[]
+  totalYearsExperience: string
 }
 
 export async function POST(request: NextRequest) {
@@ -92,55 +112,91 @@ export async function POST(request: NextRequest) {
 }
 
 async function parseResumeWithAIVision(base64Data: string, fileType: string): Promise<ParsedResumeData> {
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+  const genai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
   })
 
-  const prompt = `You are a resume parser. Extract the following information from this resume PDF and return it as JSON.
+  const prompt = `You are an expert resume parser. Extract comprehensive information from this resume PDF and return it as JSON.
 
 Extract and return ONLY a JSON object with these exact fields:
 {
-  "userName": "Full name of the person",
-  "email": "Email address (empty string if not found)",
-  "phone": "Phone number (empty string if not found)",
-  "professionalSummary": "A 2-3 sentence summary of their experience and background",
-  "keySkills": "Comma-separated list of their main technical and professional skills"
+  "userName": "Full name",
+  "email": "Email address",
+  "phone": "Phone number",
+  "professionalSummary": "2-3 sentence career summary",
+  "keySkills": "Comma-separated skills",
+  "totalYearsExperience": "Total years of professional experience (e.g., '5 years', '2+ years')",
+  "workExperience": [
+    {
+      "company": "Company name",
+      "position": "Job title",
+      "duration": "Time period (e.g., 'Jan 2020 - Present', '2018-2020')",
+      "responsibilities": ["Key responsibility 1", "Key responsibility 2"],
+      "achievements": ["Notable achievement 1", "Notable achievement 2"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "University/College name",
+      "degree": "Degree type (e.g., 'Bachelor of Science', 'Master of Arts')",
+      "field": "Field of study",
+      "graduationYear": "Year (e.g., '2020', 'Expected 2024')"
+    }
+  ],
+  "certifications": ["Certification 1", "Certification 2"],
+  "projects": ["Project 1: Brief description", "Project 2: Brief description"]
 }
 
-Rules:
-- userName: Extract the person's full name from the top of the resume
-- email: Extract email address if present
-- phone: Extract phone number if present (format as-is)
-- professionalSummary: Write a concise 2-3 sentence summary capturing their role, experience level, and key strengths
-- keySkills: List 8-12 most relevant skills as comma-separated values
+Detailed Instructions:
+- userName: Extract full name from the top of resume
+- email: Extract email address (empty string if not found)
+- phone: Extract phone number as-is (empty string if not found)
+- professionalSummary: Write a compelling 2-3 sentence summary of their career, highlighting role, experience level, and key strengths
+- keySkills: List 10-15 most relevant technical and professional skills as comma-separated values
+- totalYearsExperience: Calculate or extract total years of professional experience
+- workExperience: Extract ALL work positions with:
+  * company: Company name
+  * position: Job title/role
+  * duration: Time period worked
+  * responsibilities: 3-5 key responsibilities or duties
+  * achievements: 2-4 quantifiable achievements or notable accomplishments
+- education: Extract ALL educational qualifications
+- certifications: List ALL professional certifications, licenses, or credentials
+- projects: Extract notable projects with brief descriptions (especially relevant for tech roles)
 
-If any field cannot be found, use an empty string. Return ONLY the JSON object, no other text.`
+If any field is not found, use empty string for strings or empty array for arrays. Return ONLY the JSON object, no other text.`
 
-  const completion = await openai.chat.completions.create({
-    messages: [
+  const response = await genai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: [
       {
-        role: "user",
-        content: [
-          { type: "text", text: prompt },
+        parts: [
+          { text: prompt },
           {
-            type: "image_url",
-            image_url: {
-              url: `data:application/pdf;base64,${base64Data}`,
+            inlineData: {
+              mimeType: 'application/pdf',
+              data: base64Data,
             },
           },
         ],
       },
     ],
-    model: "gpt-4o",
-    response_format: { type: "json_object" },
-    max_tokens: 800,
-    temperature: 0.3,
   })
 
-  const responseText = completion.choices[0]?.message?.content || '{}'
+  const responseText = response.text || '{}'
 
   try {
-    const parsed = JSON.parse(responseText) as ParsedResumeData
+    // Clean the response text to extract JSON
+    let jsonText = responseText.trim()
+    
+    // Remove markdown code blocks if present
+    if (jsonText.startsWith('```json')) {
+      jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '')
+    } else if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/```\n?/g, '')
+    }
+    
+    const parsed = JSON.parse(jsonText) as ParsedResumeData
 
     // Validate and provide defaults
     return {
@@ -148,53 +204,97 @@ If any field cannot be found, use an empty string. Return ONLY the JSON object, 
       email: parsed.email || '',
       phone: parsed.phone || '',
       professionalSummary: parsed.professionalSummary || '',
-      keySkills: parsed.keySkills || ''
+      keySkills: parsed.keySkills || '',
+      workExperience: parsed.workExperience || [],
+      education: parsed.education || [],
+      certifications: parsed.certifications || [],
+      projects: parsed.projects || [],
+      totalYearsExperience: parsed.totalYearsExperience || ''
     }
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse AI response:', error)
+    console.error('Response text:', responseText)
     throw new Error('Failed to parse AI response')
   }
 }
 
 async function parseResumeWithAI(resumeText: string): Promise<ParsedResumeData> {
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+  const genai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
   })
 
-  const prompt = `You are a resume parser. Extract the following information from this resume and return it as JSON.
+  const prompt = `You are an expert resume parser. Extract comprehensive information from this resume and return it as JSON.
 
 Resume Text:
 ${resumeText}
 
 Extract and return ONLY a JSON object with these exact fields:
 {
-  "userName": "Full name of the person",
-  "email": "Email address (empty string if not found)",
-  "phone": "Phone number (empty string if not found)",
-  "professionalSummary": "A 2-3 sentence summary of their experience and background",
-  "keySkills": "Comma-separated list of their main technical and professional skills"
+  "userName": "Full name",
+  "email": "Email address",
+  "phone": "Phone number",
+  "professionalSummary": "2-3 sentence career summary",
+  "keySkills": "Comma-separated skills",
+  "totalYearsExperience": "Total years of professional experience (e.g., '5 years', '2+ years')",
+  "workExperience": [
+    {
+      "company": "Company name",
+      "position": "Job title",
+      "duration": "Time period (e.g., 'Jan 2020 - Present', '2018-2020')",
+      "responsibilities": ["Key responsibility 1", "Key responsibility 2"],
+      "achievements": ["Notable achievement 1", "Notable achievement 2"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "University/College name",
+      "degree": "Degree type (e.g., 'Bachelor of Science', 'Master of Arts')",
+      "field": "Field of study",
+      "graduationYear": "Year (e.g., '2020', 'Expected 2024')"
+    }
+  ],
+  "certifications": ["Certification 1", "Certification 2"],
+  "projects": ["Project 1: Brief description", "Project 2: Brief description"]
 }
 
-Rules:
-- userName: Extract the person's full name from the top of the resume
-- email: Extract email address if present
-- phone: Extract phone number if present (format as-is)
-- professionalSummary: Write a concise 2-3 sentence summary capturing their role, experience level, and key strengths
-- keySkills: List 8-12 most relevant skills as comma-separated values
+Detailed Instructions:
+- userName: Extract full name from the top of resume
+- email: Extract email address (empty string if not found)
+- phone: Extract phone number as-is (empty string if not found)
+- professionalSummary: Write a compelling 2-3 sentence summary of their career, highlighting role, experience level, and key strengths
+- keySkills: List 10-15 most relevant technical and professional skills as comma-separated values
+- totalYearsExperience: Calculate or extract total years of professional experience
+- workExperience: Extract ALL work positions with:
+  * company: Company name
+  * position: Job title/role
+  * duration: Time period worked
+  * responsibilities: 3-5 key responsibilities or duties
+  * achievements: 2-4 quantifiable achievements or notable accomplishments
+- education: Extract ALL educational qualifications
+- certifications: List ALL professional certifications, licenses, or credentials
+- projects: Extract notable projects with brief descriptions (especially relevant for tech roles)
 
-If any field cannot be found, use an empty string. Return ONLY the JSON object, no other text.`
+If any field is not found, use empty string for strings or empty array for arrays. Return ONLY the JSON object, no other text.`
 
-  const completion = await openai.chat.completions.create({
-    messages: [{ role: "user", content: prompt }],
-    model: "gpt-4o",
-    response_format: { type: "json_object" },
-    max_tokens: 800,
-    temperature: 0.3,
+  const response = await genai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: prompt,
   })
 
-  const responseText = completion.choices[0]?.message?.content || '{}'
+  const responseText = response.text || '{}'
 
   try {
-    const parsed = JSON.parse(responseText) as ParsedResumeData
+    // Clean the response text to extract JSON
+    let jsonText = responseText.trim()
+    
+    // Remove markdown code blocks if present
+    if (jsonText.startsWith('```json')) {
+      jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '')
+    } else if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/```\n?/g, '')
+    }
+    
+    const parsed = JSON.parse(jsonText) as ParsedResumeData
 
     // Validate and provide defaults
     return {
@@ -202,9 +302,16 @@ If any field cannot be found, use an empty string. Return ONLY the JSON object, 
       email: parsed.email || '',
       phone: parsed.phone || '',
       professionalSummary: parsed.professionalSummary || '',
-      keySkills: parsed.keySkills || ''
+      keySkills: parsed.keySkills || '',
+      workExperience: parsed.workExperience || [],
+      education: parsed.education || [],
+      certifications: parsed.certifications || [],
+      projects: parsed.projects || [],
+      totalYearsExperience: parsed.totalYearsExperience || ''
     }
-  } catch {
+  } catch (error) {
+    console.error('Failed to parse AI response:', error)
+    console.error('Response text:', responseText)
     throw new Error('Failed to parse AI response')
   }
 }

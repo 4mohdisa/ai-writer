@@ -1,21 +1,19 @@
 import "./globals.css"
 
 import type { Metadata } from "next"
-import { Geist, Geist_Mono } from "next/font/google"
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-})
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-})
+import { Toaster } from "sonner"
+import { ReduxProvider } from "@/components/providers/ReduxProvider"
 
 export const metadata: Metadata = {
-  title: "Cover Letter Generator",
-  description: "Generate tailored cover letters for your job applications",
+  title: "CoverCraft | AI-Powered Cover Letter Generator",
+  description: "Create stunning, personalized cover letters in seconds. CoverCraft uses AI to craft professional cover letters tailored to your dream job.",
+  keywords: ["cover letter", "AI", "job application", "resume", "career"],
+  authors: [{ name: "CoverCraft" }],
+  openGraph: {
+    title: "CoverCraft | AI-Powered Cover Letter Generator",
+    description: "Create stunning, personalized cover letters in seconds.",
+    type: "website",
+  },
 }
 
 export default function RootLayout({
@@ -24,12 +22,26 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-        <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-        >
+    <html lang="en" className="scroll-smooth">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      </head>
+      <body className="min-h-screen antialiased">
+        <ReduxProvider>
           {children}
-        </body>
+          <Toaster 
+            position="bottom-right"
+            toastOptions={{
+              style: {
+                background: 'hsl(var(--card))',
+                border: '1px solid hsl(var(--border))',
+                color: 'hsl(var(--foreground))',
+              },
+            }}
+          />
+        </ReduxProvider>
+      </body>
     </html>
   )
 }

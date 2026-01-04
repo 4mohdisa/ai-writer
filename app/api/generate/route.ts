@@ -1,7 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
+import { GoogleGenAI } from '@google/genai'
+import { getSuccessfulExamples } from '@/lib/learning-system'
 
 type ToneType = 'professional' | 'conversational' | 'enthusiastic' | 'formal'
+
+interface WorkExperience {
+  company: string
+  position: string
+  duration: string
+  responsibilities: string[]
+  achievements: string[]
+}
+
+interface Education {
+  institution: string
+  degree: string
+  field: string
+  graduationYear: string
+}
 
 interface GenerateRequest {
   // User Information
@@ -10,6 +26,11 @@ interface GenerateRequest {
   phone?: string
   professionalSummary?: string
   keySkills?: string
+  workExperience?: WorkExperience[]
+  education?: Education[]
+  certifications?: string[]
+  projects?: string[]
+  totalYearsExperience?: string
 
   // Job Information
   jobTitle: string
@@ -21,159 +42,6 @@ interface GenerateRequest {
   tone: ToneType
 }
 
-// Project database for intelligent selection based on job requirements
-const PROJECTS = {
-  // AI & Machine Learning Projects
-  ai: [
-    {
-      name: "Hire Sync AI",
-      description: "AI-powered job board with intelligent job matching and resume analysis",
-      tech: "Next.js, PostgreSQL, Anthropic Claude, Google Gemini, TypeScript",
-      keywords: ["ai", "machine learning", "job matching", "resume analysis", "next.js", "postgresql"]
-    },
-    {
-      name: "DashGen",
-      description: "AI-powered dashboard generator with smart data visualization",
-      tech: "Next.js, TypeScript, Llama 3.1 405B, Recharts, PostgreSQL",
-      keywords: ["ai", "dashboard", "data visualization", "llama", "analytics", "charts"]
-    },
-    {
-      name: "Arabic Text Extraction",
-      description: "OCR tool with GPT-4o Vision for Arabic text recognition",
-      tech: "Next.js, OpenAI GPT-4o Vision, Tesseract.js, TypeScript",
-      keywords: ["ocr", "gpt-4", "text extraction", "arabic", "computer vision", "ai"]
-    },
-    {
-      name: "ChatGennie AI",
-      description: "AI chatbot mobile application",
-      tech: "Flutter, AI Integration",
-      keywords: ["flutter", "mobile", "chatbot", "ai", "mobile development"]
-    }
-  ],
-  
-  // Full-Stack Web Development
-  fullstack: [
-    {
-      name: "Vibes",
-      description: "Real-time MERN chat application with WebSocket communication",
-      tech: "MongoDB, Express, React, Node.js, Socket.io, Redux Toolkit",
-      keywords: ["mern", "real-time", "chat", "websocket", "socket.io", "react", "mongodb"]
-    },
-    {
-      name: "NextJ-SaaS-ShipFast",
-      description: "Production-ready SaaS boilerplate with billing and authentication",
-      tech: "Next.js 14, Convex, Clerk, Stripe, TypeScript, Tailwind CSS",
-      keywords: ["saas", "boilerplate", "stripe", "authentication", "billing", "next.js"]
-    },
-    {
-      name: "Ledgerly",
-      description: "Personal finance management with transaction tracking",
-      tech: "Next.js 14, TypeScript, Supabase, Redux Toolkit, Tailwind CSS",
-      keywords: ["finance", "tracking", "supabase", "redux", "personal finance", "transactions"]
-    },
-    {
-      name: "Nexlify",
-      description: "Modern web development project",
-      tech: "Next.js, TypeScript, Modern Web Technologies",
-      keywords: ["next.js", "typescript", "web development", "modern"]
-    }
-  ],
-  
-  // Blockchain & Web3
-  blockchain: [
-    {
-      name: "Supply Chain DAPP",
-      description: "Blockchain supply chain management with IoT integration",
-      tech: "Ethereum, Solidity, React, FastAPI, Arduino, DHT11 sensors",
-      keywords: ["blockchain", "ethereum", "solidity", "supply chain", "iot", "dapp", "smart contracts"]
-    },
-    {
-      name: "Web3 Chat Application",
-      description: "Decentralized chat platform on blockchain",
-      tech: "Next.js, Web3, Tailwind CSS",
-      keywords: ["web3", "blockchain", "decentralized", "chat", "next.js"]
-    }
-  ],
-  
-  // Data & Automation
-  automation: [
-    {
-      name: "TextExtraction-GoogleSheets",
-      description: "Automated text extraction to Google Sheets integration",
-      tech: "Python, Google Sheets API, Text Processing",
-      keywords: ["automation", "google sheets", "text extraction", "python", "api integration"]
-    },
-    {
-      name: "Python Email Scraper",
-      description: "Email data extraction and processing tool",
-      tech: "Python, Web Scraping, Data Processing",
-      keywords: ["python", "scraping", "email", "data processing", "automation"]
-    },
-    {
-      name: "X Finder",
-      description: "Search and discovery tool",
-      tech: "Web Technologies, Search Algorithms",
-      keywords: ["search", "discovery", "algorithms", "web"]
-    }
-  ],
-  
-  // Enterprise & Management
-  enterprise: [
-    {
-      name: "Crime Management System",
-      description: "Law enforcement management system",
-      tech: "Database Management, System Architecture",
-      keywords: ["management system", "database", "enterprise", "system design"]
-    },
-    {
-      name: "Next WordPress Blog",
-      description: "Modern blogging platform with WordPress backend",
-      tech: "Next.js, WordPress, Content Management",
-      keywords: ["wordpress", "blog", "cms", "content management", "next.js"]
-    }
-  ]
-}
-
-function selectRelevantProjects(jobDescription: string, jobTitle: string): string[] {
-  const jobText = `${jobDescription} ${jobTitle}`.toLowerCase()
-  const selectedProjects: Array<{name: string, description: string, score: number}> = []
-  
-  // Analyze all projects and score them based on keyword matches
-  Object.values(PROJECTS).flat().forEach(project => {
-    let score = 0
-    project.keywords.forEach(keyword => {
-      if (jobText.includes(keyword)) {
-        score += 1
-      }
-    })
-    
-    if (score > 0) {
-      selectedProjects.push({
-        name: project.name,
-        description: project.description,
-        score: score
-      })
-    }
-  })
-  
-  // Sort by relevance score and return top 4
-  const topProjects = selectedProjects
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 4)
-    .map(p => `${p.name} – ${p.description}`)
-  
-  // If no relevant projects found, return default popular projects
-  if (topProjects.length === 0) {
-    return [
-      "Hire Sync AI – AI-powered job board with intelligent matching",
-      "DashGen – AI-powered dashboard generator", 
-      "Vibes – Real-time MERN chat application",
-      "Ledgerly – Personal finance management platform"
-    ]
-  }
-  
-  return topProjects
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -187,8 +55,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Generate cover letter using OpenAI
-    const coverLetter = await generateWithOpenAI(body)
+    // Generate cover letter using Gemini
+    const coverLetter = await generateWithGemini(body)
 
     return NextResponse.json({ body: coverLetter })
 
@@ -234,98 +102,170 @@ This cover letter was generated based on the job requirements and tailored to hi
 function getToneInstructions(tone: ToneType): string {
   const toneGuides = {
     conversational: `
-      - Use casual, conversational language
-      - Sound human and authentic, not corporate
-      - Focus on problem-solving mindset
-      - Keep sentences short and punchy
-      - Use "I" statements confidently
-      - No buzzwords or corporate speak
-      - Make it feel personal and genuine`,
+      Use casual conversational language
+      Sound human and authentic not corporate
+      Focus on problem solving mindset
+      Keep sentences short and punchy
+      Use I statements confidently
+      No buzzwords or corporate speak
+      Make it feel personal and genuine`,
 
     professional: `
-      - Use professional but approachable language
-      - Balance formality with personality
-      - Demonstrate competence without being overly casual
-      - Use complete sentences with proper structure
-      - Show enthusiasm while maintaining professionalism
-      - Avoid slang but don't be stiff`,
+      Use professional but approachable language
+      Balance formality with personality
+      Demonstrate competence without being overly casual
+      Use complete sentences with proper structure
+      Show enthusiasm while maintaining professionalism
+      Avoid slang but do not be stiff`,
 
     enthusiastic: `
-      - Show genuine excitement about the opportunity
-      - Use energetic and positive language
-      - Express passion for the work and company
-      - Be dynamic and engaging in tone
-      - Demonstrate eagerness to contribute
-      - Maintain professionalism while showing personality`,
+      Show genuine excitement about the opportunity
+      Use energetic and positive language
+      Express passion for the work and company
+      Be dynamic and engaging in tone
+      Demonstrate eagerness to contribute
+      Maintain professionalism while showing personality`,
 
     formal: `
-      - Use traditional, formal business language
-      - Maintain professional distance
-      - Use complete, well-structured sentences
-      - Follow traditional cover letter conventions
-      - Be respectful and courteous throughout
-      - Demonstrate seriousness and commitment`
+      Use traditional formal business language
+      Maintain professional distance
+      Use complete well structured sentences
+      Follow traditional cover letter conventions
+      Be respectful and courteous throughout
+      Demonstrate seriousness and commitment`
   }
 
   return toneGuides[tone]
 }
 
-async function generateWithOpenAI(data: GenerateRequest): Promise<string> {
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+async function generateWithGemini(data: GenerateRequest): Promise<string> {
+  const genai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
   })
 
-  // Select relevant projects based on job requirements (if we still want to use this feature)
-  const relevantProjects = selectRelevantProjects(data.jobDescription, data.jobTitle)
+  // Build comprehensive user profile section
+  let userProfile = `
+Name ${data.userName}${data.email ? `\nEmail ${data.email}` : ''}${data.phone ? `\nPhone ${data.phone}` : ''}`
 
-  // Build user profile section
-  const userProfile = `
-- Name: ${data.userName}${data.email ? `\n- Email: ${data.email}` : ''}${data.phone ? `\n- Phone: ${data.phone}` : ''}${data.keySkills ? `\n- Skills: ${data.keySkills}` : ''}${data.professionalSummary ? `\n- Experience: ${data.professionalSummary}` : ''}`
+  if (data.totalYearsExperience) {
+    userProfile += `\nTotal Experience ${data.totalYearsExperience}`
+  }
+
+  if (data.professionalSummary) {
+    userProfile += `\nProfessional Summary ${data.professionalSummary}`
+  }
+
+  if (data.keySkills) {
+    userProfile += `\nKey Skills ${data.keySkills}`
+  }
+
+  // Add detailed work experience
+  if (data.workExperience && data.workExperience.length > 0) {
+    userProfile += `\n\nWork Experience`
+    data.workExperience.forEach((exp, index) => {
+      userProfile += `\n${index + 1}. ${exp.position} at ${exp.company} (${exp.duration})`
+      if (exp.responsibilities && exp.responsibilities.length > 0) {
+        userProfile += `\n   Responsibilities: ${exp.responsibilities.join(', ')}`
+      }
+      if (exp.achievements && exp.achievements.length > 0) {
+        userProfile += `\n   Achievements: ${exp.achievements.join(', ')}`
+      }
+    })
+  }
+
+  // Add education
+  if (data.education && data.education.length > 0) {
+    userProfile += `\n\nEducation`
+    data.education.forEach((edu, index) => {
+      userProfile += `\n${index + 1}. ${edu.degree} in ${edu.field} from ${edu.institution} (${edu.graduationYear})`
+    })
+  }
+
+  // Add certifications
+  if (data.certifications && data.certifications.length > 0) {
+    userProfile += `\n\nCertifications: ${data.certifications.join(', ')}`
+  }
+
+  // Add projects
+  if (data.projects && data.projects.length > 0) {
+    userProfile += `\n\nNotable Projects`
+    data.projects.forEach((project, index) => {
+      userProfile += `\n${index + 1}. ${project}`
+    })
+  }
 
   // Get tone-specific instructions
   const toneInstructions = getToneInstructions(data.tone)
 
-  const prompt = `You are ${data.userName} writing a cover letter for a job application.
+  // Retrieve successful examples for learning
+  const successfulExamples = await getSuccessfulExamples(data.jobTitle, data.tone, 2)
+  
+  let examplesSection = ''
+  if (successfulExamples.length > 0) {
+    examplesSection = `\n\nSUCCESSFUL EXAMPLES FOR REFERENCE\nHere are examples of highly rated cover letters for similar positions with the same tone. Use these as inspiration for style and structure but DO NOT copy them. Create something unique for this applicant.\n\n`
+    
+    successfulExamples.forEach((example, index) => {
+      examplesSection += `Example ${index + 1} for ${example.jobTitle} at ${example.companyName}\n${example.generatedLetter.substring(0, 400)}...\n\n`
+    })
+  }
 
-**Job Information:**
-- Position: ${data.jobTitle}
-- Company: ${data.companyName}
-- Job Description: ${data.jobDescription}
-- Additional Notes: ${data.extraNotes || 'None'}
+  const prompt = `You are a professional cover letter writer helping ${data.userName} create a compelling cover letter for a job application.
 
-**Your Profile:**
+Job Information
+Position ${data.jobTitle}
+Company ${data.companyName}
+Job Description ${data.jobDescription}
+Additional Notes ${data.extraNotes || 'None'}
+
+Applicant Profile
 ${userProfile}
 
-**Writing Tone:** ${data.tone.charAt(0).toUpperCase() + data.tone.slice(1)}
+Writing Tone ${data.tone.charAt(0).toUpperCase() + data.tone.slice(1)}${examplesSection}
 
-**TONE & STYLE REQUIREMENTS:**
+TONE AND STYLE REQUIREMENTS
 ${toneInstructions}
 
-**STRUCTURE GUIDELINES:**
-1. Opening: Strong hook that shows genuine interest in the company/role
-2. Introduction: Brief introduction connecting your background to the role
-3. Qualifications: Highlight 2-3 key qualifications that match the job requirements
-4. Value Proposition: Explain what you bring to the company
-5. Closing: Professional closing with clear call to action
+STRUCTURE GUIDELINES
+Opening Strong hook that shows genuine interest in the company and role
+Introduction Brief introduction connecting the applicant background to the role
+Qualifications Highlight 2 to 3 key qualifications that match the job requirements
+Value Proposition Explain what the applicant brings to the company
+Closing Professional closing with clear call to action
 
-**IMPORTANT INSTRUCTIONS:**
-- Tailor the content specifically to the job description provided
-- ${data.keySkills ? 'Incorporate the skills mentioned in the profile naturally' : 'Focus on general qualifications'}
-- ${data.professionalSummary ? 'Reference the experience provided in the profile' : 'Keep experience section brief and adaptable'}
-- Match the job description keywords and requirements
-- Keep the letter concise (250-400 words)
-- Make it feel authentic and personal to ${data.userName}
-- Include appropriate contact information at the end
-- Replace generic statements with specific, relevant details from the job description
+IMPORTANT INSTRUCTIONS FOR HUMANIZED OUTPUT
+Write in first person as ${data.userName}
+Tailor the content specifically to the job description provided
+${data.workExperience && data.workExperience.length > 0 ? 'Reference specific achievements and responsibilities from the work experience provided. Use quantifiable results when available.' : ''}
+${data.education && data.education.length > 0 ? 'Mention relevant educational background when it aligns with job requirements.' : ''}
+${data.certifications && data.certifications.length > 0 ? 'Highlight relevant certifications that match the job requirements.' : ''}
+${data.projects && data.projects.length > 0 ? 'Reference relevant projects that demonstrate skills needed for this role.' : ''}
+${data.keySkills ? 'Naturally incorporate the skills listed ' + data.keySkills : 'Focus on transferable skills and qualifications'}
+${data.professionalSummary ? 'Build upon this experience ' + data.professionalSummary : 'Focus on enthusiasm and potential if experience is limited'}
+${data.totalYearsExperience ? 'Emphasize ' + data.totalYearsExperience + ' of experience when relevant to the position' : ''}
+Match the job description keywords and requirements naturally
+Keep the letter concise between 230 and 280 words maximum
+Make it feel authentic and personal
+Include appropriate contact information at the end with name${data.email ? ' and email' : ''}${data.phone ? ' and phone' : ''}
+Use specific examples from the work experience achievements and responsibilities provided
+Avoid generic statements and use specific relevant details from both the job description and the applicant profile
+Do NOT fabricate experience or skills not mentioned in the profile
+ONLY use information explicitly provided in the applicant profile above
 
-Generate the cover letter now:`
+CRITICAL FORMATTING RULES
+Do NOT use any special characters like dashes hyphens colons semicolons or bullet points
+Do NOT use asterisks or any markdown formatting
+Write in natural flowing paragraphs only
+Use simple plain text without any special symbols
+Write like a real human would write naturally
+No lists no bullet points no special formatting
+Just write natural conversational paragraphs
 
-  const completion = await openai.chat.completions.create({
-    messages: [{ role: "user", content: prompt }],
-    model: "gpt-4o",
-    max_tokens: 1000,
-    temperature: 0.7,
+Generate the cover letter now as plain natural text`
+
+  const response = await genai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: prompt,
   })
 
-  return completion.choices[0]?.message?.content || 'Failed to generate cover letter'
+  return response.text || 'Failed to generate cover letter'
 }
