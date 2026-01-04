@@ -3,6 +3,19 @@ import "./globals.css"
 import type { Metadata } from "next"
 import { Toaster } from "sonner"
 import { ReduxProvider } from "@/components/providers/ReduxProvider"
+import { Outfit, JetBrains_Mono } from "next/font/google"
+
+const outfit = Outfit({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700", "800"],
+  variable: "--font-outfit",
+})
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-jetbrains-mono",
+})
 
 export const metadata: Metadata = {
   title: "CoverCraft | AI-Powered Cover Letter Generator",
@@ -23,11 +36,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="scroll-smooth">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      </head>
-      <body className="min-h-screen antialiased">
+      <body className={`min-h-screen antialiased ${outfit.variable} ${jetbrainsMono.variable}`}>
         <ReduxProvider>
           {children}
           <Toaster 
